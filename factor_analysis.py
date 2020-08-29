@@ -2,7 +2,6 @@ import numpy as np
 import sklearn.model_selection as ms
 
 from joblib import Parallel,delayed
-from joblib import wrap_non_picklable_objects
 
 class factor_analysis:
 
