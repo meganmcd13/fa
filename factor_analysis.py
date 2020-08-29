@@ -169,7 +169,7 @@ class factor_analysis:
             # iterate through each zDim
             if parallelize:
                 tmp_LL = Parallel(n_jobs=-1,prefer='threads')\
-                (delayed(wrap_non_picklable_objects(self.__cv_helper))(X_train,X_test,z_list[j],rand_seed=rand_seed)\
+                (delayed(self.__cv_helper)(X_train,X_test,z_list[j],rand_seed=rand_seed)\
                 for j in range(len(z_list)))
                 LLs[i,:] = tmp_LL
             else:
