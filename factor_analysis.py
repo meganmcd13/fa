@@ -1,8 +1,10 @@
 import numpy as np
 import sklearn.model_selection as ms
 
+# imports for parallization capabilities
 from joblib import Parallel,delayed
-from joblib import wrap_non_picklable_objects
+from functools import partial
+from psutil import cpu_count
 
 class factor_analysis:
 
@@ -158,7 +160,7 @@ class factor_analysis:
         cv_kfold = ms.KFold(n_splits=n_folds,shuffle=True,random_state=rand_seed)
 
         # iterate through train/test splits
-        i = 0
+        i = 0            
         LLs = np.zeros([n_folds,len(z_list)])
         for train_idx,test_idx in cv_kfold.split(X):
             if verbose:
@@ -168,13 +170,13 @@ class factor_analysis:
             
             # iterate through each zDim
             if parallelize:
-                tmp_LL = Parallel(n_jobs=-1,prefer='threads')\
-                (delayed(wrap_non_picklable_objects(self.__cv_helper))(X_train,X_test,z_list[j],rand_seed=rand_seed)\
-                for j in range(len(z_list)))
+                func = partial(self._cv_helper,Xtrain=X_train,Xtest=X_test,rand_seed=rand_seed)
+                tmp_LL = Parallel(n_jobs=cpu_count(logical=False),backend='loky')\
+                    (delayed(func)(z_list[j]) for j in range(len(z_list)))
                 LLs[i,:] = tmp_LL
             else:
                 for j in range(len(z_list)):
-                    LLs[i,j] = self.__cv_helper(X_train,X_test,z_list[j],rand_seed=rand_seed)
+                    LLs[i,j] = self._cv_helper(z_list[j],X_train,X_test,rand_seed=rand_seed)
             i = i+1
         
         sum_LLs = LLs.sum(axis=0)
@@ -193,7 +195,7 @@ class factor_analysis:
         return LL_curves
 
 
-    def __cv_helper(self,Xtrain,Xtest,zDim,rand_seed=None):
+    def _cv_helper(self,zDim,Xtrain,Xtest,rand_seed=None):
         tmp = factor_analysis(self.model_type,self.min_var)
         tmp.train(Xtrain,zDim,rand_seed=rand_seed)
         z,curr_LL = tmp.estep(Xtest)
