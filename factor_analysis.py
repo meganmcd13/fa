@@ -16,16 +16,19 @@ class factor_analysis:
         self.min_var = min_var
 
 
-    def train(self,X,zDim,tol=1e-6,max_iter=int(1e8),verbose=False,rand_seed=None):
+    def train(self,X,zDim,tol=1e-3,max_iter=int(1e8),verbose=False,rand_seed=None,X_early_stop=None):
         # set random seed
         if not(rand_seed is None):
             np.random.seed(rand_seed)
+
+        early_stop = not(X_early_stop is None)
 
         # some useful parameters
         N,D = X.shape
         mu = X.mean(axis=0)
         cX = X - mu
         covX = np.cov(cX.T,bias=True)
+        cov_Xtest = np.cov(X_early_stop.T,bias=True) if early_stop else None
         var_floor = self.min_var*np.diag(covX)
         Iz = np.identity(zDim)
         Ix = np.identity(D)
@@ -51,6 +54,7 @@ class factor_analysis:
 
         # fit fa model
         LL = []
+        testLL = []
         for i in range(max_iter):
             # E-step
             iPh = np.diag(1/Ph)
@@ -59,13 +63,6 @@ class factor_analysis:
             iSigL = iSig.dot(L)
             cov_iSigL = covX.dot(iSigL)
             E_zz = Iz - (L.T).dot(iSigL) + (iSigL.T).dot(cov_iSigL)
-            
-            # compute log likelihood
-            logDet = 2*np.sum(np.log(np.diag(np.linalg.cholesky(iSig))))
-            curr_LL = -N/2 * (const - logDet + np.trace(iSig.dot(covX)))
-            LL.append(curr_LL)
-            if verbose:
-                print('EM iteration ',i,', LL={:.2f}'.format(curr_LL))
 
             # M-step
             L = cov_iSigL.dot(np.linalg.inv(E_zz))
@@ -78,22 +75,47 @@ class factor_analysis:
             # make sure values are above noise floor
             Ph = np.maximum(Ph,self.min_var)
 
-            # check convergence
-            if i<=1:
-                LLbase = curr_LL
-            elif curr_LL<LL[-2]:
-                print('EM violoation')
-            elif (LL[-1]-LLbase)<((1+tol)*(LL[-2]-LLbase)):
-                break
+            # compute log likelihood
+            logDet = 2 * np.sum(np.log(np.diag(np.linalg.cholesky(iSig))))
+            curr_LL = -N/2 * (const - logDet + np.trace(iSig.dot(covX)))
+            LL.append(curr_LL)
+            if early_stop:
+                curr_testLL = -N/2 * (const - logDet + np.trace(iSig.dot(cov_Xtest)))
+                testLL.append(curr_testLL)
+            if verbose:
+                print('EM iteration ',i,', LL={:.2f}'.format(curr_LL))
+
+            # check convergence (training LL increases by less than tol, or testLL decreases)
+            if i>1:
+                if (LL[-1]-LL[-2])<tol or (early_stop and curr_testLL<testLL[-2]):
+                    break
 
         # store model parameters in dict
         fa_params = {'mu':mu,'L':L,'Ph':Ph,'zDim':zDim}
         self.fa_params = fa_params
 
-        tmp,curr_LL = self.estep(X)
-        LL.append(curr_LL)
+        return np.array(LL), np.array(testLL)
 
-        return np.array(LL)
+
+    def train_earlyStop(self,X,zDim,n_folds=10,rand_seed=None):
+        # set random seed
+        if not(rand_seed is None):
+            np.random.seed(rand_seed)
+            
+        N,D = X.shape
+
+        # create k-fold iterator
+        cv_kfold = ms.KFold(n_splits=n_folds,shuffle=True,random_state=rand_seed)
+
+        # iterate through train/test splits
+        self.earlyStop_params = []
+        for train_idx,test_idx in cv_kfold.split(X):
+            X_train,X_test = X[train_idx], X[test_idx]
+            tmp_mdl = factor_analysis(model_type=self.model_type,min_var=self.min_var)
+            tmp_mdl.train(X_train,zDim,rand_seed=rand_seed,X_early_stop=X_test)
+            self.earlyStop_params.append(tmp_mdl.get_params())
+
+        return 
 
 
     def get_params(self):
@@ -144,7 +166,7 @@ class factor_analysis:
         return z_orth, Lorth
 
 
-    def crossvalidate(self,X,zDim_list=np.linspace(0,10,11),n_folds=10,verbose=True,rand_seed=None,parallelize=False):
+    def crossvalidate(self,X,zDim_list=np.linspace(0,10,11),n_folds=10,verbose=True,rand_seed=None,parallelize=False,early_stop=False):
         # set random seed
         if not(rand_seed is None):
             np.random.seed(rand_seed)
@@ -170,13 +192,13 @@ class factor_analysis:
             
             # iterate through each zDim
             if parallelize:
-                func = partial(self._cv_helper,Xtrain=X_train,Xtest=X_test,rand_seed=rand_seed)
+                func = partial(self._cv_helper,Xtrain=X_train,Xtest=X_test,rand_seed=rand_seed,early_stop=early_stop)
                 tmp_LL = Parallel(n_jobs=cpu_count(logical=False),backend='loky')\
                     (delayed(func)(z_list[j]) for j in range(len(z_list)))
                 LLs[i,:] = tmp_LL
             else:
                 for j in range(len(z_list)):
-                    LLs[i,j] = self._cv_helper(z_list[j],X_train,X_test,rand_seed=rand_seed)
+                    LLs[i,j] = self._cv_helper(z_list[j],X_train,X_test,rand_seed=rand_seed,early_stop=early_stop)
             i = i+1
         
         sum_LLs = LLs.sum(axis=0)
@@ -195,9 +217,12 @@ class factor_analysis:
         return LL_curves
 
 
-    def _cv_helper(self,zDim,Xtrain,Xtest,rand_seed=None):
+    def _cv_helper(self,zDim,Xtrain,Xtest,rand_seed=None,early_stop=False):
         tmp = factor_analysis(self.model_type,self.min_var)
-        tmp.train(Xtrain,zDim,rand_seed=rand_seed)
+        if early_stop:
+            tmp.train(Xtrain,zDim,rand_seed=rand_seed,X_early_stop=Xtest)
+        else:
+            tmp.train(Xtrain,zDim,rand_seed=rand_seed)
         z,curr_LL = tmp.estep(Xtest)
         return curr_LL
 
@@ -243,6 +268,26 @@ class factor_analysis:
             'dshared':dshared,
             'part_ratio':part_ratio,
             'zDim':zDim
+        }
+        return metrics
+
+
+    def compute_earlyStop_metrics(self,cutoff_thresh=0.95):
+        # compute this as the average across the early stop parameters
+        zDim,dshared,part_ratio,avg_psv = [],[],[],[]
+        for params in self.earlyStop_params:
+            tmp_mdl = factor_analysis(model_type=self.model_type,min_var=self.min_var)
+            tmp_mdl.set_params(params)
+            tmp = tmp_mdl.compute_metrics(cutoff_thresh=cutoff_thresh)
+            zDim.append(tmp['zDim'])
+            dshared.append(tmp['dshared'])
+            part_ratio.append(tmp['part_ratio'])
+            avg_psv.append(tmp['psv'])
+        metrics = {
+            'psv':np.mean(np.array(avg_psv)),
+            'dshared':np.mean(np.array(dshared)),
+            'part_ratio':np.mean(np.array(part_ratio)),
+            'zDim':np.mean(np.array(zDim))
         }
         return metrics
 
