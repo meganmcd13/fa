@@ -1,4 +1,5 @@
 import numpy as np
+import scipy.linalg as slin
 import sklearn.model_selection as ms
 
 # imports for parallization capabilities
@@ -16,7 +17,7 @@ class factor_analysis:
         self.min_var = min_var
 
 
-    def train(self,X,zDim,tol=1e-3,max_iter=int(1e8),verbose=False,rand_seed=None,X_early_stop=None):
+    def train(self,X,zDim,tol=1e-6,max_iter=int(1e8),verbose=False,rand_seed=None,X_early_stop=None):
         # set random seed
         if not(rand_seed is None):
             np.random.seed(rand_seed)
@@ -228,16 +229,28 @@ class factor_analysis:
 
 
     def compute_psv(self):
-        L = self.fa_params['L']
-        Ph = self.fa_params['Ph']
-
+        L,Ph = self.fa_params['L'], self.fa_params['Ph']
         shared_var = np.diag(L.dot(L.T))
-
         psv = shared_var / (shared_var+Ph)
-
         avg_psv = np.mean(psv)
-
         return avg_psv, psv
+
+
+    def compute_psv_heldout(self,X_heldout):
+        L,Ph = self.fa_params['L'], self.fa_params['Ph']
+        _,L_orth = slin.eigh(L.dot(L.T))
+        L_orth = L_orth[:,::-1]
+        L_orth = L_orth[:,0:L.shape[1]]
+
+        X_cent = X_heldout - self.fa_params['mu']
+        N = X_heldout.shape[0]
+        covX = (1/N)*X_cent.T.dot(X_cent)
+        total_var = np.diag(covX)
+
+        iSig = slin.inv(L.dot(L.T)+np.diag(Ph))
+        shared_var = np.diag(covX.dot(iSig).dot(L.dot(L.T)))
+
+        return np.mean(shared_var/total_var)
 
 
     def compute_dshared(self,cutoff_thresh=0.95):
@@ -290,4 +303,38 @@ class factor_analysis:
             'zDim':np.mean(np.array(zDim))
         }
         return metrics
+
+
+    def compute_cv_psv(self,X,zDim,rand_seed=None,n_boots=10,test_size=0.1,verbose=False,early_stop=True,return_each=False):
+        # create k-fold iterator
+        if verbose:
+            print('Crossvalidating percent shared variance...')
+        cv_folds = ms.ShuffleSplit(n_splits=n_boots,random_state=rand_seed,\
+            train_size=1-test_size,test_size=test_size)
+
+        # iterate through train/test splits
+        i = 0
+        train_psv,test_psv = np.zeros(n_boots),np.zeros(n_boots)
+        for train_idx,test_idx in cv_folds.split(X):
+            if verbose:
+                print('   Bootstrap sample ',i+1,' of ',n_boots,'...')
+
+            X_train,X_test = X[train_idx], X[test_idx]
+            
+            # train model
+            tmp = factor_analysis(self.model_type,self.min_var)
+            if early_stop:
+                tmp.train(X_train,zDim,rand_seed=rand_seed,X_early_stop=X_test)
+            else:
+                tmp.train(X_train,zDim,rand_seed=rand_seed)
+
+            train_psv[i] = tmp.compute_metrics()['psv']
+            test_psv[i] = tmp.compute_psv_heldout(X_test)
+
+            i = i+1
+
+        if return_each:
+            return train_psv, test_psv
+        else:
+            return np.mean(test_psv)
 
