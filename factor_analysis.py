@@ -32,8 +32,6 @@ class factor_analysis:
         if early_stop:
             cX_test = X_early_stop-mu
             cov_Xtest = (1/N)*(cX_test.T.dot(cX_test))
-        else:
-            cX_test = None
         var_floor = self.min_var*np.diag(covX)
         Iz = np.identity(zDim)
         Ix = np.identity(D)
