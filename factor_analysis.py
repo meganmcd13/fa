@@ -28,8 +28,12 @@ class factor_analysis:
         N,D = X.shape
         mu = X.mean(axis=0)
         cX = X - mu
-        covX = np.cov(cX.T,bias=True)
-        cov_Xtest = np.cov(X_early_stop.T,bias=True) if early_stop else None
+        covX = (1/N)*(cX.T.dot(cX))#(np.cov(cX.T,bias=True)
+        if early_stop:
+            cX_test = X_early_stop-mu
+            cov_Xtest = (1/N)*(cX_test.T.dot(cX_test))
+        else:
+            cX_test = None
         var_floor = self.min_var*np.diag(covX)
         Iz = np.identity(zDim)
         Ix = np.identity(D)
