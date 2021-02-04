@@ -247,10 +247,10 @@ class factor_analysis:
         X_cent = X_heldout - self.fa_params['mu']
         N = X_heldout.shape[0]
         covX = (1/N)*X_cent.T.dot(X_cent)
-        total_var = np.diag(covX)
-
         iSig = slin.inv(L.dot(L.T)+np.diag(Ph))
+
         shared_var = np.diag(covX.dot(iSig).dot(L.dot(L.T)))
+        total_var = shared_var + Ph
 
         return np.mean(shared_var/total_var)
 
