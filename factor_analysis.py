@@ -240,17 +240,24 @@ class factor_analysis:
 
     def compute_psv_heldout(self,X_heldout):
         L,Ph = self.fa_params['L'], self.fa_params['Ph']
-        _,L_orth = slin.eigh(L.dot(L.T))
-        L_orth = L_orth[:,::-1]
-        L_orth = L_orth[:,0:L.shape[1]]
+        zDim = L.shape[1]
+        L_eig,L_orth = slin.eigh(L.dot(L.T))
+        L_eig,L_orth = L_eig[::-1],L_orth[:,::-1]
+        L_eig,L_orth = L_eig[0:zDim],L_orth[:,0:zDim]
+        sqrt_LL = L_orth.dot(np.diag(np.sqrt(L_eig))).dot(L_orth.T)
+
+        sig = L.dot(L.T)+np.diag(Ph)
+        iSig = slin.inv(sig)
+        sqrt_iSig = slin.sqrtm(iSig)
 
         X_cent = X_heldout - self.fa_params['mu']
         N = X_heldout.shape[0]
         covX = (1/N)*X_cent.T.dot(X_cent)
-        iSig = slin.inv(L.dot(L.T)+np.diag(Ph))
 
-        shared_var = np.diag(covX.dot(iSig).dot(L.dot(L.T)))
-        total_var = shared_var + Ph
+        shared_var = sqrt_LL.dot(sqrt_iSig.dot(covX).dot(sqrt_iSig)).dot(sqrt_LL)
+        shared_var = np.diag(shared_var)
+
+        total_var = np.diag(covX)
 
         return np.mean(shared_var/total_var)
 
@@ -307,7 +314,7 @@ class factor_analysis:
         return metrics
 
 
-    def compute_cv_psv(self,X,zDim,rand_seed=None,n_boots=10,test_size=0.1,verbose=False,early_stop=True,return_each=False):
+    def compute_cv_psv(self,X,zDim,rand_seed=None,n_boots=100,test_size=0.1,verbose=False,early_stop=True,return_each=False):
         # create k-fold iterator
         if verbose:
             print('Crossvalidating percent shared variance...')
