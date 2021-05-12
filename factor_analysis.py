@@ -62,13 +62,13 @@ class factor_analysis:
             # E-step
             iPh = np.diag(1/Ph)
             iPhL = iPh.dot(L)
-            iSig = iPh - iPhL.dot(np.linalg.inv(Iz+(L.T).dot(iPhL))).dot(iPhL.T)
+            iSig = iPh - iPhL.dot(slin.inv(Iz+(L.T).dot(iPhL))).dot(iPhL.T)
             iSigL = iSig.dot(L)
             cov_iSigL = covX.dot(iSigL)
             E_zz = Iz - (L.T).dot(iSigL) + (iSigL.T).dot(cov_iSigL)
 
             # M-step
-            L = cov_iSigL.dot(np.linalg.inv(E_zz))
+            L = cov_iSigL.dot(slin.inv(E_zz))
             Ph = np.diag(covX) - np.diag(cov_iSigL.dot(L.T))
 
             # set noise values to be the same if ppca
@@ -141,7 +141,7 @@ class factor_analysis:
         Iz = np.eye(zDim)
 
         est_cov = L.dot(L.T) + np.diag(Ph)
-        iSig = np.linalg.inv(est_cov)
+        iSig = slin.inv(est_cov)
 
         # compute posterior on latents
         z_mu = (L.T).dot(iSig).dot(cX.T)
@@ -241,24 +241,17 @@ class factor_analysis:
     def compute_psv_heldout(self,X_heldout):
         L,Ph = self.fa_params['L'], self.fa_params['Ph']
         zDim = L.shape[1]
-        L_eig,L_orth = slin.eigh(L.dot(L.T))
-        L_eig,L_orth = L_eig[::-1],L_orth[:,::-1]
-        L_eig,L_orth = L_eig[0:zDim],L_orth[:,0:zDim]
-        sqrt_LL = L_orth.dot(np.diag(np.sqrt(L_eig))).dot(L_orth.T)
 
         sig = L.dot(L.T)+np.diag(Ph)
         iSig = slin.inv(sig)
-        sqrt_iSig = slin.sqrtm(iSig)
+        covX = np.cov(X_heldout.T,bias=True)
 
-        X_cent = X_heldout - self.fa_params['mu']
-        N = X_heldout.shape[0]
-        covX = (1/N)*X_cent.T.dot(X_cent)
+        # z_unc = np.eye(zDim) - L.T.dot(iSig).dot(L)
+        z_unc = np.eye(zDim) - L.T.dot(iSig).dot(L)
+        cov_ez = L.T.dot(iSig).dot(covX).dot(iSig).dot(L)
 
-        shared_var = sqrt_LL.dot(sqrt_iSig.dot(covX).dot(sqrt_iSig)).dot(sqrt_LL)
-        shared_var = np.diag(shared_var)
-
+        shared_var = np.diag(L.dot(z_unc + cov_ez).dot(L.T))
         total_var = np.diag(covX)
-
         return np.mean(shared_var/total_var)
 
 
