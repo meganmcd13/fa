@@ -330,7 +330,7 @@ class factor_analysis:
             else:
                 tmp.train(X_train,zDim,rand_seed=rand_seed)
 
-            train_psv[i] = tmp.compute_metrics()['psv']
+            train_psv[i] = tmp.compute_psv_heldout(X_train)
             test_psv[i] = tmp.compute_psv_heldout(X_test)
 
             i = i+1
