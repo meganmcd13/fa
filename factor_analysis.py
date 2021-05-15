@@ -338,5 +338,5 @@ class factor_analysis:
         if return_each:
             return train_psv, test_psv
         else:
-            return np.mean(test_psv)
+            return np.mean(train_psv),np.mean(test_psv)
 
