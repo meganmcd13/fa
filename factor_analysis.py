@@ -169,7 +169,7 @@ class factor_analysis:
         return z_orth, Lorth
 
 
-    def crossvalidate(self,X,zDim_list=np.linspace(0,10,11),n_folds=10,verbose=True,rand_seed=None,parallelize=False,early_stop=False):
+    def crossvalidate(self,X,zDim_list=np.linspace(0,10,11),n_folds=10,tol=1e-6,verbose=True,rand_seed=None,parallelize=False,early_stop=False):
         # set random seed
         if not(rand_seed is None):
             np.random.seed(rand_seed)
@@ -195,13 +195,13 @@ class factor_analysis:
             
             # iterate through each zDim
             if parallelize:
-                func = partial(self._cv_helper,Xtrain=X_train,Xtest=X_test,rand_seed=rand_seed,early_stop=early_stop)
+                func = partial(self._cv_helper,Xtrain=X_train,Xtest=X_test,tol=tol,rand_seed=rand_seed,early_stop=early_stop)
                 tmp_LL = Parallel(n_jobs=cpu_count(logical=False),backend='loky')\
                     (delayed(func)(z_list[j]) for j in range(len(z_list)))
                 LLs[i,:] = tmp_LL
             else:
                 for j in range(len(z_list)):
-                    LLs[i,j] = self._cv_helper(z_list[j],X_train,X_test,rand_seed=rand_seed,early_stop=early_stop)
+                    LLs[i,j] = self._cv_helper(z_list[j],X_train,X_test,tol=tol,rand_seed=rand_seed,early_stop=early_stop)
             i = i+1
         
         sum_LLs = LLs.sum(axis=0)
@@ -220,12 +220,12 @@ class factor_analysis:
         return LL_curves
 
 
-    def _cv_helper(self,zDim,Xtrain,Xtest,rand_seed=None,early_stop=False):
+    def _cv_helper(self,zDim,Xtrain,Xtest,tol=1e-6,rand_seed=None,early_stop=False):
         tmp = factor_analysis(self.model_type,self.min_var)
         if early_stop:
-            tmp.train(Xtrain,zDim,rand_seed=rand_seed,X_early_stop=Xtest)
+            tmp.train(Xtrain,zDim,tol=tol,rand_seed=rand_seed,X_early_stop=Xtest)
         else:
-            tmp.train(Xtrain,zDim,rand_seed=rand_seed)
+            tmp.train(Xtrain,zDim,tol=tol,rand_seed=rand_seed)
         z,curr_LL = tmp.estep(Xtest)
         return curr_LL
 
